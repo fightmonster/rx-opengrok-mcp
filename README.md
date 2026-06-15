@@ -10,17 +10,22 @@ OpenGrok pre-indexes large multi-repository codebases and serves a fast search A
 
 ### Tools
 
-All search tools take a `project` parameter (the OpenGrok project name — use `opengrok_list_projects` to discover what's available).
+All search tools take a `project` parameter (the OpenGrok project name — use `opengrok_list_projects` or `opengrok_rx_list_projects_with_repos` to discover what's available).
 
 | Tool | Purpose | Typical use |
 |------|---------|-------------|
-| `opengrok_list_projects` | List every indexed project on the OpenGrok instance | Discover what's searchable before drilling in |
+| `opengrok_list_projects` | List every indexed project on the OpenGrok instance (REST API; may require HTTP basic auth) | Discover what's searchable before drilling in |
+| `opengrok_rx_list_projects_with_repos` | List projects **and** each project's sub-repositories in one anonymous call (scrapes the public web UI) | **Use this when `opengrok_list_projects` returns 401/403**, or whenever you also need to know the sub-repo structure of a project. Works without credentials |
 | `opengrok_search_full_text` | Free-text search inside file contents | Find log messages, error strings, comments, config values |
 | `opengrok_search_definition` | Find where a function, class, or method is **defined** | *"Where is `parseConfig` defined?"* — jumps straight to declarations, not call sites |
 | `opengrok_search_symbol` | Find **references** to a symbol | *"What calls `parseConfig`?"* — locates usages across the whole project |
 | `opengrok_search_file_path` | Find files by path or filename | *"Find every `Dockerfile` in the monorepo"* |
 | `opengrok_search_by_type` | Filter by file type (`python`, `cpp`, `java`, …) | Narrow a search to a specific language |
 | `opengrok_get_file_content` | Read a file's raw contents from an indexed project, optionally sliced to a line range | Pull the surrounding context of a search hit without cloning the repo |
+
+#### When to use `opengrok_rx_list_projects_with_repos`
+
+`opengrok_list_projects` calls `/api/v1/projects`, which some OpenGrok deployments guard with HTTP basic auth. If that tool returns **401 Unauthorized** or **403 Forbidden**, the REST API is behind auth and your agent should immediately fall back to `opengrok_rx_list_projects_with_repos`. The fallback scrapes the public HTML UI — it works anonymously and additionally returns each project's sub-repositories (top-level subdirectories of the xref tree, e.g. `sys/`, `vnd/` for an AOSP project). Use it as the discovery tool whenever you need both project names *and* sub-repo names.
 
 #### Common search parameters
 
@@ -133,6 +138,69 @@ For VS Code's MCP integration (`settings.json`):
 }
 ```
 
+For Cursor (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "opengrok": {
+      "command": "node",
+      "args": ["/absolute/path/to/opengrok-mcp/dist/index.js"],
+      "env": {
+        "OPENGROK_URL": "https://opengrok.example.com"
+      }
+    }
+  }
+}
+```
+
+For Trae (`~/.trae/mcp.json` or via the Trae MCP settings panel — same JSON shape as Cursor):
+
+```json
+{
+  "mcpServers": {
+    "opengrok": {
+      "command": "node",
+      "args": ["/absolute/path/to/opengrok-mcp/dist/index.js"],
+      "env": {
+        "OPENGROK_URL": "https://opengrok.example.com"
+      }
+    }
+  }
+}
+```
+
+For Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.opengrok]
+command = "node"
+args = ["/absolute/path/to/opengrok-mcp/dist/index.js"]
+
+[mcp_servers.opengrok.env]
+OPENGROK_URL = "https://opengrok.example.com"
+```
+
+For Antigravity CLI — Google's agent CLI, formerly known as Gemini CLI (`~/.gemini/settings.json` or `~/.agy/settings.json` depending on release channel — same `mcpServers` shape):
+
+```json
+{
+  "mcpServers": {
+    "opengrok": {
+      "command": "node",
+      "args": ["/absolute/path/to/opengrok-mcp/dist/index.js"],
+      "env": {
+        "OPENGROK_URL": "https://opengrok.example.com"
+      }
+    }
+  }
+}
+```
+
+> **All paths above are absolute.** MCP clients spawn the child process and don't inherit your shell's `$PATH` lookups in a portable way — point directly at the `dist/index.js` file you built.
+>
+> **Authentication is per-instance.** If your OpenGrok deployment requires HTTP basic auth, also set `OPENGROK_USERNAME` and `OPENGROK_PASSWORD` in the `env` block (Codex: add them under `[mcp_servers.opengrok.env]`). If the REST API is locked but `/api/v1/search` and `/raw/` are open, prefer `opengrok_rx_list_projects_with_repos` over `opengrok_list_projects`.
+
 ## Contributing
 
 Contributions are welcome — bug fixes, new tools, better result formatting, tests, and CI setup are all good areas.
@@ -142,8 +210,10 @@ Contributions are welcome — bug fixes, new tools, better result formatting, te
 ```
 src/index.ts        # entire server: tool definitions, HTTP client, formatters (single file)
 tests/format.test.ts # unit tests for the pure helpers (formatters, query builder, validators)
+tests/rx_projects.test.ts # unit tests for the OpenGrok HTML parsers used by opengrok_rx_list_projects_with_repos
 tsconfig.json       # strict TypeScript, ES2020, ESM
 package.json        # build = tsc + chmod, start = node dist/index.js
+LICENSE             # ISC license
 ```
 
 The codebase is intentionally tiny. New tools should be added as additional `server.tool(...)` registrations in `src/index.ts`, following the existing zod-validated pattern.

@@ -411,6 +411,113 @@ async function search(
   return formatSearchResponse(response.data, fileOrder);
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Deployment-specific helper: discover projects + sub-repos by scraping the
+// OpenGrok web UI. Anonymous, no /api/v1 access required. Useful when the
+// REST API is behind auth (e.g. the rx deployment) but the web UI is open.
+// Marked `rx_` in the tool name to flag that it depends on the default
+// OpenGrok HTML structure — if a future OpenGrok release reshuffles the
+// homepage `<select id="project">` block or the xref directory listing, the
+// parsers in this section are the only thing to update.
+// ──────────────────────────────────────────────────────────────────────────
+
+export function parseProjectsFromHomepageHTML(html: string): string[] {
+  // Scope to the project <select> so we don't accidentally pick up <option>
+  // tags from unrelated controls (sort, file-type, etc.).
+  const selectMatch = html.match(
+    /<select\b[^>]*\bid="project"[^>]*>([\s\S]*?)<\/select>/i
+  );
+  if (!selectMatch) {
+    return [];
+  }
+  const block = selectMatch[1];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of block.matchAll(/<option\s+[^>]*\bvalue="([^"]+)"/gi)) {
+    const v = m[1];
+    if (v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+export function parseSubReposFromXrefHTML(html: string): string[] {
+  // Sub-repo directory anchors look like `<a href="sys/">sys</a>`. The
+  // trailing slash distinguishes directories from files (`README.md` etc.),
+  // and the `[^"/]+` character class excludes the absolute breadcrumbs
+  // (`/source/xref/...`) plus the parent-dir `..` (which has no trailing /).
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of html.matchAll(/<a\s+[^>]*\bhref="([^"\/]+)\/"/gi)) {
+    const v = m[1];
+    if (v && v !== ".." && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+export interface ProjectWithRepos {
+  project: string;
+  repos: string[];
+  error?: string;
+}
+
+export function formatProjectsWithRepos(entries: ProjectWithRepos[]): string {
+  if (entries.length === 0) {
+    return "No projects found.";
+  }
+  const sorted = [...entries].sort((a, b) => a.project.localeCompare(b.project));
+  const totalRepos = sorted.reduce((n, e) => n + e.repos.length, 0);
+  const lines: string[] = [];
+  lines.push(
+    `Found ${sorted.length} project(s) with ${totalRepos} sub-repo(s) total:\n`
+  );
+  for (const entry of sorted) {
+    lines.push(`## ${entry.project}`);
+    if (entry.error) {
+      lines.push(`  (failed to fetch sub-repos: ${entry.error})`);
+    } else if (entry.repos.length === 0) {
+      lines.push("  (no sub-repos)");
+    } else {
+      for (const repo of [...entry.repos].sort()) {
+        lines.push(`  - ${repo}`);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+async function fetchHTML(path: string): Promise<string> {
+  const resp = await client.get<string>(path, {
+    responseType: "text",
+    transformResponse: [(d) => d],
+  });
+  return resp.data;
+}
+
+async function fetchProjectsWithRepos(): Promise<ProjectWithRepos[]> {
+  const homepage = await fetchHTML("/");
+  const projects = parseProjectsFromHomepageHTML(homepage);
+  const settled = await Promise.allSettled(
+    projects.map(async (project) => {
+      const xrefHTML = await fetchHTML(`/xref/${encodeURI(project)}/`);
+      return parseSubReposFromXrefHTML(xrefHTML);
+    })
+  );
+  return projects.map((project, i) => {
+    const r = settled[i];
+    if (r.status === "fulfilled") {
+      return { project, repos: r.value };
+    }
+    return { project, repos: [], error: formatError(r.reason) };
+  });
+}
+
 const server = new McpServer({
   name: "opengrok",
   version: "1.0.0",
@@ -567,12 +674,23 @@ server.tool(
 
 server.tool(
   "opengrok_list_projects",
-  "List every indexed project on the OpenGrok instance. Call this first to discover what's searchable; the returned names are valid values for the `project` argument of every search tool.",
+  "List every indexed project on the OpenGrok instance. Call this first to discover what's searchable; the returned names are valid values for the `project` argument of every search tool. If this returns HTTP 401 / 403, the REST API is behind auth — fall back to `opengrok_rx_list_projects_with_repos`, which scrapes the public web UI and also returns each project's sub-repositories.",
   {},
   async () =>
     runTool(async () => {
       const response = await client.get<string[]>("/api/v1/projects");
       return formatProjects(response.data);
+    })
+);
+
+server.tool(
+  "opengrok_rx_list_projects_with_repos",
+  "[rx-specific] Discover every project AND its top-level sub-repositories in one call by scraping the OpenGrok web UI. Anonymous — no /api/v1 auth required, suitable when /api/v1/projects is behind HTTP Basic auth but /xref/ is open. Use this instead of `opengrok_list_projects` on deployments where the REST API is locked down. Returns Markdown grouped by project; each sub-repo is the second path component you'll see in search results (e.g. `sys`, `vnd`).",
+  {},
+  async () =>
+    runTool(async () => {
+      const entries = await fetchProjectsWithRepos();
+      return formatProjectsWithRepos(entries);
     })
 );
 

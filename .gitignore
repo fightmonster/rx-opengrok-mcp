@@ -21,3 +21,9 @@ log.txt
 
 # Host-specific setup script — contains real hostnames/IPs, not for the public repo
 setup-opengrok-tunnel-mcp.sh
+
+# Host-specific smoke test — hardcodes a known project / file path on a specific deployment
+tests/smoke_e2e.sh
+
+# npm pack output
+*.tgz
