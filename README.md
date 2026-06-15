@@ -93,6 +93,15 @@ npm install -g https://github.com/fightmonster/rx-opengrok-mcp/releases/latest/d
 
 Re-run the same command any time a new release ships — npm reads `version` from the `package.json` embedded in the tarball, detects the bump, and reinstalls in place.
 
+After the global install, compute the absolute path and use it in the MCP config (see [Register with your MCP client](#register-with-your-mcp-client)):
+
+```sh
+GLOBAL_DIST="$(npm root -g)/opengrok-mcp/dist/index.js"
+echo "MCP args path: $GLOBAL_DIST"
+```
+
+Hardcode `$GLOBAL_DIST` into the `args` array of your client's config (don't leave `$(...)` literal — JSON configs don't expand it).
+
 Prefer downloading first? Same flow with a local file:
 
 ```sh
@@ -106,10 +115,13 @@ Local install (no root, scoped to a directory):
 ```sh
 mkdir -p ~/.local/mcp && cd ~/.local/mcp
 npm install https://github.com/fightmonster/rx-opengrok-mcp/releases/latest/download/opengrok-mcp.tgz
-# MCP config: command = "node", args = ["$HOME/.local/mcp/node_modules/opengrok-mcp/dist/index.js"]
+# Hardcode the printed path into your MCP config's args array.
+echo "$(pwd)/node_modules/opengrok-mcp/dist/index.js"
 ```
 
 > **Why `npm install` and not just `node dist/index.js`?** The MCP SDK, axios, and zod live in `node_modules/`. Skipping the install step produces `Cannot find module '@modelcontextprotocol/sdk'` on first launch. The tarball deliberately omits `node_modules` to stay small (~19 KB vs. ~50 MB with deps).
+>
+> **Why `node` + absolute path and not the `opengrok-mcp` launcher?** The npm bin symlink (`opengrok-mcp`) is broken in this release due to a `main()` guard that compares the entry-point path to the symlink target — when invoked through the symlink, the guard skips `main()` and the process exits 0 with no output. Use `node` + absolute path until that's fixed.
 
 ### Build from source
 ```sh
@@ -228,9 +240,18 @@ For Antigravity CLI — Google's agent CLI, formerly known as Gemini CLI (`~/.ge
 }
 ```
 
-> **All paths above are absolute.** MCP clients spawn the child process and don't inherit your shell's `$PATH` lookups in a portable way — point directly at the `dist/index.js` file you built.
+> **All paths above are absolute.** MCP clients spawn the child process and don't inherit your shell's `$PATH` lookups in a portable way — point directly at the `dist/index.js` file you built. JSON config doesn't expand `~` or `$(...)`, so the path must be a literal absolute path on the target machine.
 >
-> **If you installed via `npm install -g` from a release tarball** (see [Install from a release tarball](#install-from-a-release-tarball)), you can replace `command` + `args` with just `{"command": "opengrok-mcp"}` — the global install puts the launcher on `$PATH`. For a local npm install, point `args` at `node_modules/opengrok-mcp/dist/index.js` under wherever you ran `npm install`.
+> **If you installed via `npm install -g` from a release tarball** (see [Install from a release tarball](#install-from-a-release-tarball)), replace the placeholder path with the absolute path to the npm-installed `dist/index.js`. Compute it with:
+>
+> ```sh
+> # Global install:
+> echo "$(npm root -g)/opengrok-mcp/dist/index.js"
+> # Local install (e.g. under ~/.local/mcp):
+> echo "$(pwd)/node_modules/opengrok-mcp/dist/index.js"
+> ```
+>
+> Hardcode the result into the `args` array of the matching config block above. Don't use the `opengrok-mcp` symlink npm installs into `$PATH` — the launcher is broken in this release (silent-exit bug in the `main()` guard when invoked via the npm symlink, see [issue tracker](#)); `node` + absolute path is the supported invocation.
 >
 > **Authentication is per-instance.** If your OpenGrok deployment requires HTTP basic auth, also set `OPENGROK_USERNAME` and `OPENGROK_PASSWORD` in the `env` block (Codex: add them under `[mcp_servers.opengrok.env]`). If the REST API is locked but `/api/v1/search` and `/raw/` are open, prefer `opengrok_rx_list_projects_with_repos` over `opengrok_list_projects`.
 
