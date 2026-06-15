@@ -79,6 +79,26 @@ If at some point this server grows an HTTP/SSE transport, that will be a separat
 ### Prerequisites
 - Node.js 18 or newer
 - Network access to a running OpenGrok instance exposing `/api/v1/...`
+- A GitHub release tag (e.g. `v1.1.0`) if you're installing from a tarball — see below
+
+### Install from a release tarball
+
+Each GitHub release ships `opengrok-mcp-<version>.tgz`. It contains the compiled `dist/`, the README, the LICENSE, and `package.json` — **not** `node_modules/`. You must run `npm install` to pull the runtime dependencies (`@modelcontextprotocol/sdk`, `axios`, `zod`) from the npm registry before the server can start. The tarball is not designed to be unpacked and pointed at with `node` directly.
+
+```sh
+# 1. Download from the Releases page (or `gh release download v1.1.0`)
+wget https://github.com/fightmonster/rx-opengrok-mcp/releases/download/v1.1.0/opengrok-mcp-1.1.0.tgz
+
+# 2a. Global install — puts the `opengrok-mcp` binary on $PATH
+npm install -g ./opengrok-mcp-1.1.0.tgz
+
+# 2b. Local install — no root needed, scoped to a directory
+mkdir -p ~/.local/mcp && cd ~/.local/mcp
+npm install ./opengrok-mcp-1.1.0.tgz
+# MCP config: command = "node", args = ["$HOME/.local/mcp/node_modules/opengrok-mcp/dist/index.js"]
+```
+
+> **Why `npm install` and not just `node dist/index.js`?** The MCP SDK, axios, and zod live in `node_modules/`. Skipping the install step produces `Cannot find module '@modelcontextprotocol/sdk'` on first launch. The tarball deliberately omits `node_modules` to stay small (~19 KB vs. ~50 MB with deps).
 
 ### Build from source
 ```sh
@@ -198,6 +218,8 @@ For Antigravity CLI — Google's agent CLI, formerly known as Gemini CLI (`~/.ge
 ```
 
 > **All paths above are absolute.** MCP clients spawn the child process and don't inherit your shell's `$PATH` lookups in a portable way — point directly at the `dist/index.js` file you built.
+>
+> **If you installed via `npm install -g` from a release tarball** (see [Install from a release tarball](#install-from-a-release-tarball)), you can replace `command` + `args` with just `{"command": "opengrok-mcp"}` — the global install puts the launcher on `$PATH`. For a local npm install, point `args` at `node_modules/opengrok-mcp/dist/index.js` under wherever you ran `npm install`.
 >
 > **Authentication is per-instance.** If your OpenGrok deployment requires HTTP basic auth, also set `OPENGROK_USERNAME` and `OPENGROK_PASSWORD` in the `env` block (Codex: add them under `[mcp_servers.opengrok.env]`). If the REST API is locked but `/api/v1/search` and `/raw/` are open, prefer `opengrok_rx_list_projects_with_repos` over `opengrok_list_projects`.
 
