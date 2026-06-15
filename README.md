@@ -83,18 +83,29 @@ If at some point this server grows an HTTP/SSE transport, that will be a separat
 
 ### Install from a release tarball
 
-Each GitHub release ships `opengrok-mcp-<version>.tgz`. It contains the compiled `dist/`, the README, the LICENSE, and `package.json` — **not** `node_modules/`. You must run `npm install` to pull the runtime dependencies (`@modelcontextprotocol/sdk`, `axios`, `zod`) from the npm registry before the server can start. The tarball is not designed to be unpacked and pointed at with `node` directly.
+Each GitHub release ships a single asset `opengrok-mcp.tgz` (no version in the filename). The file contains the compiled `dist/`, the README, the LICENSE, and `package.json` — **not** `node_modules/`. You must run `npm install` to pull the runtime dependencies (`@modelcontextprotocol/sdk`, `axios`, `zod`) from the npm registry before the server can start. The tarball is not designed to be unpacked and pointed at with `node` directly.
+
+The tarball is reachable through GitHub's stable `/releases/latest/download/...` URL, so a single command installs **and** upgrades:
 
 ```sh
-# 1. Download from the Releases page (or `gh release download v1.1.0`)
-wget https://github.com/fightmonster/rx-opengrok-mcp/releases/download/v1.1.0/opengrok-mcp-1.1.0.tgz
+npm install -g https://github.com/fightmonster/rx-opengrok-mcp/releases/latest/download/opengrok-mcp.tgz
+```
 
-# 2a. Global install — puts the `opengrok-mcp` binary on $PATH
-npm install -g ./opengrok-mcp-1.1.0.tgz
+Re-run the same command any time a new release ships — npm reads `version` from the `package.json` embedded in the tarball, detects the bump, and reinstalls in place.
 
-# 2b. Local install — no root needed, scoped to a directory
+Prefer downloading first? Same flow with a local file:
+
+```sh
+curl -L -o opengrok-mcp.tgz \
+  https://github.com/fightmonster/rx-opengrok-mcp/releases/latest/download/opengrok-mcp.tgz
+npm install -g ./opengrok-mcp.tgz
+```
+
+Local install (no root, scoped to a directory):
+
+```sh
 mkdir -p ~/.local/mcp && cd ~/.local/mcp
-npm install ./opengrok-mcp-1.1.0.tgz
+npm install https://github.com/fightmonster/rx-opengrok-mcp/releases/latest/download/opengrok-mcp.tgz
 # MCP config: command = "node", args = ["$HOME/.local/mcp/node_modules/opengrok-mcp/dist/index.js"]
 ```
 
